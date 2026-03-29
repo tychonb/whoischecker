@@ -1,0 +1,304 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleKey {
+  ADMIN
+  SECURITY_ANALYST
+  OPERATOR
+  VIEWER
+}
+
+enum DomainState {
+  active
+  paused
+  attention
+}
+
+enum MonitorAction {
+  LOG_ONLY
+  NOTIFY
+  AUTO_REGISTER
+}
+
+enum CheckFrequency {
+  every_5_minutes
+  every_15_minutes
+  hourly
+  daily
+  custom
+}
+
+enum Priority {
+  low
+  normal
+  high
+}
+
+enum AvailabilityStatus {
+  available
+  registered
+  unknown
+  rate_limited
+  provider_error
+  unsupported_tld
+}
+
+enum RegistrationStatus {
+  pending
+  submitted
+  success
+  failed
+}
+
+enum NotificationChannel {
+  email
+  webhook
+  ntfy
+  slack
+}
+
+enum NotificationStatus {
+  queued
+  sent
+  failed
+}
+
+enum AuditSeverity {
+  info
+  warning
+  critical
+}
+
+enum JobStatus {
+  queued
+  running
+  completed
+  failed
+  retrying
+}
+
+model Role {
+  id          String @id @default(cuid())
+  key         RoleKey @unique
+  name        String
+  description String
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Team {
+  id           String @id @default(cuid())
+  name         String
+  slug         String @unique
+  users        User[]
+  domainWatches DomainWatch[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model User {
+  id                 String @id @default(cuid())
+  email              String @unique
+  name               String
+  passwordHash       String
+  ntfyEnabled        Boolean @default(false)
+  ntfyServerUrl      String?
+  ntfyTopic          String?
+  lastLoginAt        DateTime?
+  isActive           Boolean @default(true)
+  roleId             String
+  role               Role @relation(fields: [roleId], references: [id])
+  teamId             String?
+  team               Team? @relation(fields: [teamId], references: [id])
+  ownedDomainWatches DomainWatch[] @relation("DomainWatchOwner")
+  auditLogs          AuditLog[] @relation("AuditLogActor")
+  credentials        ProviderCredential[]
+  systemSettings     SystemSetting[] @relation("SystemSettingUpdatedBy")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model DomainWatch {
+  id                  String @id @default(cuid())
+  rootName            String
+  displayName         String
+  state               DomainState
+  frequency           CheckFrequency
+  customSchedule      String?
+  actionMode          MonitorAction
+  priority            Priority
+  tags                Json
+  notes               String?
+  ntfyEnabled         Boolean @default(false)
+  ntfyTopic           String?
+  autoRegisterEnabled Boolean @default(false)
+  registrarLinked     Boolean @default(false)
+  lastCheckAt         DateTime?
+  nextCheckAt         DateTime
+  ownerId             String
+  owner               User @relation("DomainWatchOwner", fields: [ownerId], references: [id])
+  teamId              String?
+  team                Team? @relation(fields: [teamId], references: [id])
+  extensions          DomainExtension[]
+  checkRuns           CheckRun[]
+  registrationAttempts RegistrationAttempt[]
+  notificationEvents  NotificationEvent[]
+  jobExecutions       JobExecution[]
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([teamId])
+  @@index([state, nextCheckAt])
+}
+
+model DomainExtension {
+  id                  String @id @default(cuid())
+  domainWatchId       String
+  domainWatch         DomainWatch @relation(fields: [domainWatchId], references: [id], onDelete: Cascade)
+  tld                 String
+  fqdn                String
+  status              AvailabilityStatus
+  lastCheckedAt       DateTime?
+  nextCheckAt         DateTime?
+  latencyMs           Int?
+  rawSummary          String?
+  sourceProvider      String
+  retryCount          Int @default(0)
+  autoRegisterEnabled Boolean @default(false)
+  notifyEnabled       Boolean @default(false)
+  registrationStatus  RegistrationStatus?
+  checkRuns           CheckRun[]
+  registrationAttempts RegistrationAttempt[]
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([domainWatchId, tld])
+  @@index([fqdn])
+}
+
+model CheckRun {
+  id                String @id @default(cuid())
+  domainWatchId     String
+  domainWatch       DomainWatch @relation(fields: [domainWatchId], references: [id], onDelete: Cascade)
+  domainExtensionId String?
+  domainExtension   DomainExtension? @relation(fields: [domainExtensionId], references: [id], onDelete: SetNull)
+  fqdn              String
+  tld               String
+  result            AvailabilityStatus
+  rawSummary        String
+  latencyMs         Int
+  sourceProvider    String
+  retryCount        Int @default(0)
+  checkedAt         DateTime
+
+  @@index([domainWatchId, checkedAt])
+  @@index([result])
+}
+
+model RegistrationAttempt {
+  id                String @id @default(cuid())
+  domainWatchId     String
+  domainWatch       DomainWatch @relation(fields: [domainWatchId], references: [id], onDelete: Cascade)
+  domainExtensionId String?
+  domainExtension   DomainExtension? @relation(fields: [domainExtensionId], references: [id], onDelete: SetNull)
+  fqdn              String
+  provider          String
+  status            RegistrationStatus
+  initiatedAt       DateTime
+  completedAt       DateTime?
+  errorMessage      String?
+  responseCode      String?
+  metadataSummary   String?
+  idempotencyKey    String @unique
+
+  @@index([domainWatchId, status])
+}
+
+model NotificationEvent {
+  id            String @id @default(cuid())
+  domainWatchId String?
+  domainWatch   DomainWatch? @relation(fields: [domainWatchId], references: [id], onDelete: SetNull)
+  channel       NotificationChannel
+  target        String
+  title         String
+  message       String
+  status        NotificationStatus
+  providerMeta  Json?
+  createdAt     DateTime @default(now())
+  sentAt        DateTime?
+
+  @@index([channel, status])
+}
+
+model AuditLog {
+  id          String @id @default(cuid())
+  actorUserId String?
+  actorUser   User? @relation("AuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actorName   String
+  actorRole   RoleKey
+  action      String
+  entityType  String
+  entityId    String
+  summary     String
+  ipAddress   String
+  userAgent   String
+  severity    AuditSeverity
+  result      String
+  createdAt   DateTime @default(now())
+
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model ProviderCredential {
+  id            String @id @default(cuid())
+  providerName  String
+  credentialType String
+  label         String?
+  encryptedValue String
+  ownerUserId   String?
+  ownerUser     User? @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  metadata      Json?
+  lastValidatedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([providerName, credentialType])
+}
+
+model SystemSetting {
+  id          String @id @default(cuid())
+  key         String @unique
+  value       Json
+  encrypted   Boolean @default(false)
+  updatedById String?
+  updatedBy   User? @relation("SystemSettingUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model JobExecution {
+  id               String @id @default(cuid())
+  queue            String
+  jobName          String
+  status           JobStatus
+  attemptsMade     Int @default(0)
+  maxAttempts      Int @default(0)
+  nextRunAt        DateTime?
+  lastError        String?
+  payload          Json?
+  relatedDomainWatchId String?
+  relatedDomainWatch DomainWatch? @relation(fields: [relatedDomainWatchId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([queue, status])
+}

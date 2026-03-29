@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-whoischecker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-whoischecker}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-whoischecker} -d ${POSTGRES_DB:-whoischecker}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-whoischecker}:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/${POSTGRES_DB:-whoischecker}
+      REDIS_URL: redis://redis:6379
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
+      PORT: ${PORT:-4000}
+      JWT_SECRET: ${JWT_SECRET:-change-me-super-secret-2026}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      ENABLE_EXTERNAL_DELIVERY: ${ENABLE_EXTERNAL_DELIVERY:-false}
+      ENABLE_WORKERS: ${ENABLE_WORKERS:-true}
+      ENABLE_SCHEDULER: ${ENABLE_SCHEDULER:-true}
+      RDAP_BOOTSTRAP_URL: ${RDAP_BOOTSTRAP_URL:-https://data.iana.org/rdap/dns.json}
+      RDAP_TIMEOUT_MS: ${RDAP_TIMEOUT_MS:-5000}
+      WHOIS_TIMEOUT_MS: ${WHOIS_TIMEOUT_MS:-5000}
+      CLOUDFLARE_BASE_URL: ${CLOUDFLARE_BASE_URL:-https://api.cloudflare.com/client/v4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_MODE: live
+        VITE_API_BASE_URL: /api
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
+  redis_data:

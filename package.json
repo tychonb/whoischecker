@@ -1,0 +1,28 @@
+{
+  "name": "whoischecker-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n web,api \"npm run dev --workspace @whoischecker/web\" \"npm run dev --workspace @whoischecker/api\"",
+    "dev:web": "npm run dev --workspace @whoischecker/web",
+    "dev:api": "npm run dev --workspace @whoischecker/api",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "seed": "npm run seed --workspace @whoischecker/api",
+    "db:deploy": "npm run db:deploy --workspace @whoischecker/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
