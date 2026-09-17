@@ -43,7 +43,7 @@ export async function scheduleDomainChecks() {
         },
         {
           jobId: `check:${watch.id}`,
-          repeat: repeatOptionsForFrequency(watch.frequency, watch.customSchedule),
+          repeat: repeatOptionsForFrequency(watch.frequency, watch.customSchedule ?? undefined),
         },
       ),
     ),

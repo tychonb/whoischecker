@@ -9,7 +9,7 @@ export const dashboardRouter = Router();
 dashboardRouter.get(
   "/",
   authorize("dashboard:read"),
-  asyncHandler(async (_request, response) => {
-    response.json(await dashboardService.getMetrics());
+  asyncHandler(async (request, response) => {
+    response.json(await dashboardService.getMetrics(request.sessionUser!));
   }),
 );

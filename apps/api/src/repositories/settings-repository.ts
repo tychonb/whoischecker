@@ -223,7 +223,7 @@ export class SettingsRepository {
           update: {},
           create: {
             key: row.key,
-            value: row.value,
+            value: row.value as unknown as Prisma.InputJsonValue,
             updatedById: updatedById ?? null,
           },
         });

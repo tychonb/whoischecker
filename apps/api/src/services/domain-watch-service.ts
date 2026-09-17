@@ -3,10 +3,10 @@ import { randomUUID } from "crypto";
 import {
   domainWatchPartialSchema,
   domainWatchFormSchema,
-  mockTeams,
   type DomainFilters,
   type DomainWatch,
   type DomainWatchFormValues,
+  type SessionUser,
 } from "@whoischecker/shared";
 
 import { prisma } from "@/lib/prisma";
@@ -18,10 +18,13 @@ import type { NotificationService } from "@/services/notifications/notification-
 import type { OpenproviderRegistrarService } from "@/services/registrar/openprovider-registrar-service";
 
 interface ActorMeta {
+  actorId?: string;
   actorName: string;
   actorRole: DomainWatch["owner"]["role"];
+  teamId?: string;
   ipAddress: string;
   userAgent: string;
+  system?: boolean;
 }
 
 export class DomainWatchService {
@@ -35,12 +38,15 @@ export class DomainWatchService {
     private readonly openproviderRegistrarService: OpenproviderRegistrarService,
   ) {}
 
-  list(filters?: DomainFilters) {
-    return this.domainRepository.list(filters);
+  list(filters: DomainFilters | undefined, user: SessionUser) {
+    return this.domainRepository.list(filters, user);
   }
 
-  async getById(id: string) {
-    const watch = await this.domainRepository.getById(id);
+  async getById(id: string, meta?: ActorMeta) {
+    const user = meta && !meta.system && meta.actorId
+      ? ({ id: meta.actorId, name: meta.actorName, email: "", role: meta.actorRole, teamId: meta.teamId, lastLoginAt: "", ntfyEnabled: false } satisfies SessionUser)
+      : undefined;
+    const watch = await this.domainRepository.getById(id, user);
 
     if (!watch) {
       throw createHttpError(404, "Domeinmonitor niet gevonden.", "domain_not_found");
@@ -51,6 +57,26 @@ export class DomainWatchService {
 
   async create(payload: DomainWatchFormValues, meta: ActorMeta) {
     const validated = domainWatchFormSchema.parse(payload);
+    if (!meta.actorId) {
+      throw createHttpError(403, "Een gebruikerscontext is vereist.", "forbidden");
+    }
+
+    if (meta.actorRole !== "ADMIN" && validated.ownerId !== meta.actorId) {
+      throw createHttpError(403, "Je kunt alleen monitoren voor jezelf aanmaken.", "forbidden");
+    }
+
+    if (meta.actorRole !== "ADMIN" && validated.teamId && validated.teamId !== meta.teamId) {
+      throw createHttpError(403, "Je kunt alleen je eigen team selecteren.", "forbidden");
+    }
+
+    const [owner, team] = await Promise.all([
+      prisma.user.findUnique({ where: { id: validated.ownerId }, include: { role: true } }),
+      validated.teamId ? prisma.team.findUnique({ where: { id: validated.teamId } }) : Promise.resolve(null),
+    ]);
+
+    if (!owner || !owner.isActive || (validated.teamId && !team)) {
+      throw createHttpError(400, "De geselecteerde eigenaar of het team is ongeldig.", "invalid_owner_or_team");
+    }
     const now = new Date().toISOString();
     const watch: DomainWatch = {
       id: randomUUID(),
@@ -64,12 +90,12 @@ export class DomainWatchService {
       tags: validated.tags,
       notes: validated.notes,
       owner: {
-        id: validated.ownerId,
-        name: meta.actorName,
-        email: "owner@monitoring.internal",
-        role: meta.actorRole,
+        id: owner.id,
+        name: owner.name,
+        email: owner.email,
+        role: owner.role.key,
       },
-      team: mockTeams.find((team) => team.id === validated.teamId),
+      team: team ? { id: team.id, name: team.name, slug: team.slug } : undefined,
       ntfyEnabled: validated.ntfyEnabled,
       ntfyTopic: validated.ntfyTopic,
       autoRegisterEnabled: validated.autoRegisterEnabled,
@@ -107,7 +133,7 @@ export class DomainWatchService {
 
   async update(id: string, payload: Partial<DomainWatchFormValues>, meta: ActorMeta) {
     const validated = domainWatchPartialSchema.parse(payload);
-    const watch = await this.getById(id);
+    const watch = await this.getById(id, meta);
     const nextRootName = validated.rootName ?? watch.rootName;
     const extensionMap = new Map(watch.extensions.map((extension) => [extension.tld, extension]));
 
@@ -122,7 +148,16 @@ export class DomainWatchService {
     watch.ntfyEnabled = validated.ntfyEnabled ?? watch.ntfyEnabled;
     watch.ntfyTopic = validated.ntfyTopic ?? watch.ntfyTopic;
     watch.autoRegisterEnabled = validated.autoRegisterEnabled ?? watch.autoRegisterEnabled;
-    watch.team = validated.teamId ? mockTeams.find((team) => team.id === validated.teamId) : watch.team;
+    if (validated.teamId && validated.teamId !== watch.team?.id) {
+      if (meta.actorRole !== "ADMIN" && validated.teamId !== meta.teamId) {
+        throw createHttpError(403, "Je kunt alleen je eigen team selecteren.", "forbidden");
+      }
+      const team = await prisma.team.findUnique({ where: { id: validated.teamId } });
+      if (!team) {
+        throw createHttpError(400, "Het geselecteerde team is ongeldig.", "invalid_team");
+      }
+      watch.team = { id: team.id, name: team.name, slug: team.slug };
+    }
     watch.updatedAt = new Date().toISOString();
 
     if (validated.selectedTlds) {
@@ -176,7 +211,7 @@ export class DomainWatchService {
     this.locks.add(lockKey);
 
     try {
-      const watch = await this.getById(id);
+      const watch = await this.getById(id, meta);
 
       if (watch.state === "paused") {
         throw createHttpError(409, "Gepauzeerde monitoren kunnen niet worden gecontroleerd.", "domain_paused");
@@ -233,29 +268,51 @@ export class DomainWatchService {
           }
 
           if (watch.actionMode === "AUTO_REGISTER" && extension.autoRegisterEnabled && watch.registrarLinked) {
+            const attemptId = randomUUID();
+            const idempotencyKey = `auto-register:${extension.id}`;
+            const claim = await prisma.registrationAttempt.createMany({
+              data: {
+                id: attemptId,
+                domainWatchId: watch.id,
+                domainExtensionId: extension.id,
+                fqdn: extension.fqdn,
+                provider: "openprovider-registrar",
+                status: "submitted",
+                initiatedAt: new Date(checkedAt),
+                idempotencyKey,
+              },
+              skipDuplicates: true,
+            });
+
+            if (claim.count === 0) {
+              continue;
+            }
+
+            await this.notificationService.sendAutoRegistrationResult(
+              watch,
+              extension,
+              "submitted",
+              "De registratie is veilig geclaimd en wordt bij Openprovider ingediend.",
+            );
+
             const registrationResult = await this.openproviderRegistrarService.registerDomain({
               domainWatchId: watch.id,
               fqdn: extension.fqdn,
               tld: extension.tld,
-              idempotencyKey: `${watch.id}:${extension.fqdn}:${checkedAt}`,
+              idempotencyKey,
             });
 
             extension.registrationStatus = registrationResult.status;
 
-            await prisma.registrationAttempt.create({
+            await prisma.registrationAttempt.update({
+              where: { id: attemptId },
               data: {
-                id: randomUUID(),
-                domainWatchId: watch.id,
-                domainExtensionId: extension.id,
-                fqdn: extension.fqdn,
                 provider: registrationResult.provider,
                 status: registrationResult.status,
-                initiatedAt: new Date(checkedAt),
                 completedAt: registrationResult.status === "submitted" ? null : new Date(),
                 errorMessage: registrationResult.status === "failed" ? registrationResult.detail : null,
                 responseCode: registrationResult.responseCode,
                 metadataSummary: registrationResult.metadataSummary,
-                idempotencyKey: `${watch.id}:${extension.fqdn}:${checkedAt}`,
               },
             });
 
@@ -292,7 +349,7 @@ export class DomainWatchService {
   }
 
   async setState(id: string, state: "active" | "paused", meta: ActorMeta) {
-    const watch = await this.getById(id);
+    const watch = await this.getById(id, meta);
     watch.state = state;
     watch.updatedAt = new Date().toISOString();
     await this.domainRepository.save(watch);

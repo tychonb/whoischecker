@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-whoischecker}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-whoischecker}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -17,13 +17,30 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     volumes:
       - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migration
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-whoischecker}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-whoischecker}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
 
   api:
     build:
@@ -32,12 +49,12 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-whoischecker}:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/${POSTGRES_DB:-whoischecker}
-      REDIS_URL: redis://redis:6379
-      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-whoischecker}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-whoischecker}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?FRONTEND_ORIGIN is required}
       PORT: ${PORT:-4000}
-      JWT_SECRET: ${JWT_SECRET:-change-me-super-secret-2026}
-      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      SECRET_ENCRYPTION_KEY: ${SECRET_ENCRYPTION_KEY:?SECRET_ENCRYPTION_KEY is required}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       ENABLE_EXTERNAL_DELIVERY: ${ENABLE_EXTERNAL_DELIVERY:-false}
       ENABLE_WORKERS: ${ENABLE_WORKERS:-true}
@@ -45,14 +62,28 @@ services:
       RDAP_BOOTSTRAP_URL: ${RDAP_BOOTSTRAP_URL:-https://data.iana.org/rdap/dns.json}
       RDAP_TIMEOUT_MS: ${RDAP_TIMEOUT_MS:-5000}
       WHOIS_TIMEOUT_MS: ${WHOIS_TIMEOUT_MS:-5000}
-      CLOUDFLARE_BASE_URL: ${CLOUDFLARE_BASE_URL:-https://api.cloudflare.com/client/v4}
+      OPENPROVIDER_TIMEOUT_MS: ${OPENPROVIDER_TIMEOUT_MS:-10000}
+      OPENPROVIDER_BASE_URL: ${OPENPROVIDER_BASE_URL:-https://api.openprovider.eu}
+      TRUST_PROXY: 1
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
-    ports:
-      - "4000:4000"
+    expose:
+      - "4000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:4000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   web:
     build:
@@ -63,9 +94,17 @@ services:
         VITE_API_BASE_URL: /api
     restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
-      - "80:80"
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:

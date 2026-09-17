@@ -20,8 +20,10 @@ const filterSchema = z.object({
 
 function actorMeta(request: Parameters<typeof requestMeta>[0]) {
   return {
+    actorId: request.sessionUser!.id,
     actorName: request.sessionUser!.name,
     actorRole: request.sessionUser!.role,
+    teamId: request.sessionUser!.teamId,
     ...requestMeta(request),
   };
 }
@@ -37,7 +39,7 @@ domainRouter.get(
   authorize("domains:read"),
   asyncHandler(async (request, response) => {
     const filters = filterSchema.parse(request.query);
-    response.json(await domainWatchService.list(filters));
+    response.json(await domainWatchService.list(filters, request.sessionUser!));
   }),
 );
 
@@ -55,7 +57,7 @@ domainRouter.get(
   "/:id",
   authorize("domains:read"),
   asyncHandler(async (request, response) => {
-    response.json(await domainWatchService.getById(getRouteId(request.params.id)));
+    response.json(await domainWatchService.getById(getRouteId(request.params.id), actorMeta(request)));
   }),
 );
 

@@ -54,7 +54,11 @@ authRouter.post(
   "/logout",
   authMiddleware,
   csrfMiddleware,
-  asyncHandler(async (_request, response) => {
-    response.clearCookie("session_token").clearCookie("csrf_token").json({ ok: true });
+  asyncHandler(async (request, response) => {
+    await authService.revokeSessions(request.sessionUser!.id);
+    response
+      .clearCookie("session_token", { httpOnly: true, sameSite: "strict", secure: env.COOKIE_SECURE })
+      .clearCookie("csrf_token", { httpOnly: false, sameSite: "strict", secure: env.COOKIE_SECURE })
+      .json({ ok: true });
   }),
 );

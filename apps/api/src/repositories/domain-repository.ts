@@ -1,8 +1,9 @@
 import type { Prisma } from "@prisma/client";
-import type { DomainFilters, DomainWatch } from "@whoischecker/shared";
+import type { DomainFilters, DomainWatch, SessionUser } from "@whoischecker/shared";
 
 import { prisma } from "@/lib/prisma";
 import { mapDomainWatch } from "@/repositories/mappers";
+import { domainWatchScope } from "@/utils/authorization-scope";
 
 const domainWatchInclude = {
   owner: {
@@ -20,9 +21,10 @@ const domainWatchInclude = {
 } as const;
 
 export class DomainRepository {
-  async list(filters?: DomainFilters) {
+  async list(filters: DomainFilters | undefined, user: SessionUser) {
     const records = await prisma.domainWatch.findMany({
       where: {
+        ...domainWatchScope(user),
         ...(filters?.state && filters.state !== "all" ? { state: filters.state } : {}),
         ...(filters?.autoRegisterEnabled && filters.autoRegisterEnabled !== "all"
           ? { autoRegisterEnabled: filters.autoRegisterEnabled === "enabled" }
@@ -52,9 +54,9 @@ export class DomainRepository {
     return records.map(mapDomainWatch);
   }
 
-  async getById(id: string) {
-    const record = await prisma.domainWatch.findUnique({
-      where: { id },
+  async getById(id: string, user?: SessionUser) {
+    const record = await prisma.domainWatch.findFirst({
+      where: { id, ...(user ? domainWatchScope(user) : {}) },
       include: domainWatchInclude,
     });
 

@@ -1,4 +1,5 @@
 import { env } from "@/config/env";
+import { assertSafeExternalUrl } from "@/utils/safe-external-url";
 
 import type { NtfyNotificationPayload, ProviderDeliveryResult } from "../types";
 
@@ -11,7 +12,9 @@ export class NtfyProvider {
       };
     }
 
-    const response = await fetch(`${payload.serverUrl.replace(/\/$/, "")}/${payload.topic}`, {
+    const serverUrl = await assertSafeExternalUrl(payload.serverUrl);
+    const endpoint = new URL(`${serverUrl.pathname.replace(/\/$/, "")}/${encodeURIComponent(payload.topic)}`, serverUrl.origin);
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         Title: payload.title,
@@ -20,6 +23,8 @@ export class NtfyProvider {
         ...(payload.authToken ? { Authorization: `Bearer ${payload.authToken}` } : {}),
       },
       body: payload.body,
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!response.ok) {

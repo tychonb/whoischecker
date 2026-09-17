@@ -11,6 +11,7 @@ import type {
   SessionUser,
 } from "@whoischecker/shared";
 import { mockSettings } from "@whoischecker/shared";
+import type { Prisma } from "@prisma/client";
 
 type RoleRecord = {
   key: string;
@@ -265,5 +266,4 @@ export function mapAppSettingsFromRows(input: {
     },
   };
 }
-type JsonPrimitive = string | number | boolean | null;
-export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue = Prisma.JsonValue;

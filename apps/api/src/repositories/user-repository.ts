@@ -33,6 +33,13 @@ export class UserRepository {
     });
   }
 
+  async revokeSessions(userId: string) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+    });
+  }
+
   async updateNtfyPreferences(
     userId: string,
     input: {

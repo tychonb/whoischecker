@@ -12,6 +12,7 @@ export function createCheckWorker() {
         actorRole: "OPERATOR",
         ipAddress: "10.0.0.22",
         userAgent: "bullmq/check-worker",
+        system: true,
       });
     },
     {

@@ -33,4 +33,4 @@ export const domainWatchService = new DomainWatchService(
   openproviderRegistrarService,
 );
 export const dashboardService = new DashboardService(auditService);
-export const settingsService = new SettingsService(settingsRepository, notificationService, openproviderRegistrarService);
+export const settingsService = new SettingsService(settingsRepository, notificationService, openproviderRegistrarService, auditService);

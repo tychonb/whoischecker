@@ -26,6 +26,15 @@ export function createRegistrationWorker() {
         return;
       }
 
+      const claim = await prisma.registrationAttempt.updateMany({
+        where: { id: attempt.id, status: "pending" },
+        data: { status: "submitted" },
+      });
+
+      if (claim.count === 0) {
+        return;
+      }
+
       const result = await openproviderRegistrarService.registerDomain({
         domainWatchId: attempt.domainWatchId,
         fqdn: attempt.fqdn,

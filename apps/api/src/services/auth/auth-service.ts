@@ -21,7 +21,7 @@ export class AuthService {
   async login(email: string, password: string, meta: AuthMeta) {
     const user = await this.userRepository.findByEmail(email);
 
-    if (!user || !verifyPassword(password, user.passwordHash)) {
+    if (!user || !user.isActive || !verifyPassword(password, user.passwordHash)) {
       await this.auditService.record({
         actor: email,
         actorRole: "VIEWER",
@@ -43,6 +43,7 @@ export class AuthService {
       {
         sub: sessionUser.id,
         role: sessionUser.role,
+        tokenVersion: user.tokenVersion,
       },
       env.JWT_SECRET,
       {
@@ -72,13 +73,20 @@ export class AuthService {
   }
 
   async verifySessionToken(token: string) {
-    const payload = jwt.verify(token, env.JWT_SECRET) as { sub: string };
+    const payload = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as {
+      sub: string;
+      tokenVersion: number;
+    };
     const user = await this.userRepository.findById(payload.sub);
 
-    if (!user) {
+    if (!user || !user.isActive || user.tokenVersion !== payload.tokenVersion) {
       throw createHttpError(401, "Niet geautoriseerd.", "unauthorized");
     }
 
     return this.userRepository.toSessionUser(user);
+  }
+
+  revokeSessions(userId: string) {
+    return this.userRepository.revokeSessions(userId);
   }
 }

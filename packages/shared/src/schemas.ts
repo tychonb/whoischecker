@@ -8,6 +8,19 @@ import {
   supportedTlds,
 } from "./types";
 
+const httpsUrlSchema = z.string().url().superRefine((value, context) => {
+  const url = new URL(value);
+  const hostname = url.hostname.toLowerCase();
+  if (url.protocol !== "https:" || url.username || url.password || url.port) {
+    context.addIssue({ code: "custom", message: "Gebruik een HTTPS-URL zonder credentials of afwijkende poort." });
+  }
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
+    context.addIssue({ code: "custom", message: "Lokale hosts zijn niet toegestaan." });
+  }
+});
+
+const ntfyTopicSchema = z.string().min(3).max(120).regex(/^[a-zA-Z0-9_-]+$/, "Gebruik alleen letters, cijfers, _ en -.");
+
 export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(12, "Gebruik minimaal 12 tekens."),
@@ -32,7 +45,7 @@ export const domainWatchFormBaseSchema = z.object({
   ownerId: z.string().min(1),
   teamId: z.string().optional(),
   ntfyEnabled: z.boolean(),
-  ntfyTopic: z.string().max(120).optional(),
+  ntfyTopic: ntfyTopicSchema.optional(),
   autoRegisterEnabled: z.boolean(),
 });
 
@@ -74,11 +87,11 @@ export const domainWatchPartialSchema = domainWatchFormBaseSchema.partial().supe
 
 export const notificationSettingsSchema = z.object({
   ntfyEnabled: z.boolean(),
-  ntfyServerUrl: z.string().url(),
-  ntfyTopic: z.string().min(3).max(120),
+  ntfyServerUrl: httpsUrlSchema,
+  ntfyTopic: ntfyTopicSchema,
   ntfyAuthToken: z.string().max(255).optional(),
   webhookEnabled: z.boolean(),
-  webhookUrl: z.string().url().optional().or(z.literal("")),
+  webhookUrl: httpsUrlSchema.optional().or(z.literal("")),
   emailEnabled: z.boolean(),
 });
 

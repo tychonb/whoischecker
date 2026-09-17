@@ -23,11 +23,10 @@ const rolePermissionMap: Record<RoleKey, Permission[]> = {
     "domains:write",
     "domains:check",
     "settings:read",
-    "audit:read",
     "registrations:read",
   ],
-  OPERATOR: ["dashboard:read", "domains:read", "domains:check", "audit:read", "registrations:read"],
-  VIEWER: ["dashboard:read", "domains:read", "audit:read", "registrations:read"],
+  OPERATOR: ["dashboard:read", "domains:read", "domains:check", "registrations:read"],
+  VIEWER: ["dashboard:read", "domains:read", "registrations:read"],
 };
 
 export function hasPermission(role: RoleKey, permission: Permission) {

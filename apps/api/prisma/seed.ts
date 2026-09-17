@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   mockAuditLogs,
   mockCheckRuns,
@@ -301,12 +301,12 @@ async function main() {
     await prisma.systemSetting.upsert({
       where: { key: setting.key },
       update: {
-        value: setting.value,
+        value: setting.value as unknown as Prisma.InputJsonValue,
         updatedById: "user-1",
       },
       create: {
         key: setting.key,
-        value: setting.value,
+        value: setting.value as unknown as Prisma.InputJsonValue,
         updatedById: "user-1",
       },
     });

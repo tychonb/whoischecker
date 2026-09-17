@@ -113,6 +113,7 @@ model User {
   ntfyTopic          String?
   lastLoginAt        DateTime?
   isActive           Boolean @default(true)
+  tokenVersion       Int @default(0)
   roleId             String
   role               Role @relation(fields: [roleId], references: [id])
   teamId             String?

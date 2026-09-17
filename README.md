@@ -8,9 +8,10 @@ Deze codebase is nu geschikt als basis voor een VPS-deploy met Docker:
 
 - frontend draait tegen de echte API via `/api`
 - backend gebruikt Prisma als runtime datastore
-- Docker start de API met `prisma migrate deploy`
+- Docker voert migraties uit in een aparte, eenmalige migratiecontainer
 - seeding gebeurt nooit automatisch
 - demo-data wordt alleen geladen als je dat expliciet toestaat
+- productie start niet wanneer secrets ontbreken of veilige cookies/HTTPS niet zijn ingesteld
 
 Belangrijk:
 
@@ -40,6 +41,8 @@ De Vite-devserver proxyt `/api` automatisch naar de lokale API op poort `4000`.
 - E-mail: `eva@monitoring.internal`
 - Wachtwoord: `ChangeMe!123`
 
+Gebruik deze gebruiker uitsluitend lokaal. Seed demo-data niet op een publiek bereikbare productieomgeving.
+
 ## Productie met Docker op een VPS
 
 1. Plaats de code op de server.
@@ -48,9 +51,12 @@ De Vite-devserver proxyt `/api` automatisch naar de lokale API op poort `4000`.
    - `JWT_SECRET`
    - `SECRET_ENCRYPTION_KEY`
    - `POSTGRES_PASSWORD`
+   - `REDIS_PASSWORD`
    - `FRONTEND_ORIGIN`
    - `COOKIE_SECURE=true`
-4. Start de stack:
+4. Genereer secrets, bijvoorbeeld met `openssl rand -hex 32`. Hergebruik geen secret voor JWT, encryptie, PostgreSQL of Redis.
+5. Plaats de stack achter een TLS-reverse-proxy naar `127.0.0.1:8080`. Publiceer API, PostgreSQL en Redis nooit rechtstreeks.
+6. Start de stack:
 
 ```bash
 docker compose up -d --build
@@ -59,8 +65,8 @@ docker compose up -d --build
 Wat er dan gebeurt:
 
 - Postgres en Redis starten met persistente volumes
-- de API draait eerst `prisma migrate deploy`
-- daarna start de Node API
+- een eenmalige migratiecontainer draait `prisma migrate deploy`
+- de API start alleen nadat de migratie succesvol is afgerond
 - Nginx serveert de frontend en proxyt `/api` naar de API-container
 
 ## Database en migraties
@@ -71,7 +77,7 @@ Schemawijzigingen worden in productie uitgerold via:
 npm run db:deploy
 ```
 
-of in Docker automatisch via het API-entrypoint.
+of in Docker automatisch via de aparte `migrate`-service.
 
 De database wordt niet gereset tijdens normale deploys.
 
@@ -130,10 +136,13 @@ Succesvol uitgevoerd:
 - `npm run typecheck`
 - `npm run build`
 - `npm run test --workspace @whoischecker/api`
+- `npm audit --omit=dev` (`0` kwetsbaarheden)
+- volledige Docker-build en start
+- Prisma-productiemigratie op een bestaande persistente database
+- HTTP healthcheck en container-hardening
 
 Niet uitgevoerd:
 
-- echte end-to-end Docker start op deze machine
 - echte live registratiecall naar Openprovider
 
 ## Volgende logische stap
@@ -142,5 +151,5 @@ Voor een echte productie-uitrol zou ik hierna nog doen:
 
 - Prisma ook gebruiken voor alle job-observability-tabellen
 - aanvullende TLD-specifieke validatieregels voor Openprovider toevoegen
-- healthchecks en back-ups op VPS-niveau toevoegen
+- geautomatiseerde versleutelde PostgreSQL-back-ups en restore-tests op VPS-niveau toevoegen
 - CI voor build, tests en image-publish inrichten

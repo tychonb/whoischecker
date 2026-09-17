@@ -1,13 +1,15 @@
-import type { DashboardMetrics } from "@whoischecker/shared";
+import type { DashboardMetrics, SessionUser } from "@whoischecker/shared";
 
 import { prisma } from "@/lib/prisma";
 import { mapDomainExtension } from "@/repositories/mappers";
 import type { AuditService } from "@/services/audit-service";
+import { domainWatchScope } from "@/utils/authorization-scope";
 
 export class DashboardService {
   constructor(private readonly auditService: AuditService) {}
 
-  async getMetrics(): Promise<DashboardMetrics> {
+  async getMetrics(user: SessionUser): Promise<DashboardMetrics> {
+    const watchScope = domainWatchScope(user);
     const [
       recentLogs,
       domainCount,
@@ -24,38 +26,41 @@ export class DashboardService {
       pendingRegistrations,
       registrationAttempts,
     ] = await Promise.all([
-      this.auditService.list(),
-      prisma.domainWatch.count(),
-      prisma.domainWatch.count({ where: { state: "active" } }),
+      user.role === "ADMIN" ? this.auditService.list() : Promise.resolve([]),
+      prisma.domainWatch.count({ where: watchScope }),
+      prisma.domainWatch.count({ where: { ...watchScope, state: "active" } }),
       prisma.domainExtension.findMany({
-        where: { status: "available" },
+        where: { status: "available", domainWatch: watchScope },
         orderBy: { updatedAt: "desc" },
         take: 5,
       }),
-      prisma.registrationAttempt.findMany(),
-      prisma.domainExtension.count({ where: { status: "unknown" } }),
-      prisma.domainExtension.count({ where: { status: "provider_error" } }),
+      prisma.registrationAttempt.findMany({ where: { domainWatch: watchScope } }),
+      prisma.domainExtension.count({ where: { status: "unknown", domainWatch: watchScope } }),
+      prisma.domainExtension.count({ where: { status: "provider_error", domainWatch: watchScope } }),
       prisma.domainWatch.count({
         where: {
+          ...watchScope,
           state: "active",
         },
       }),
       prisma.registrationAttempt.count({
         where: {
           status: "failed",
+          domainWatch: watchScope,
         },
       }),
       prisma.notificationEvent.count({
         where: {
           status: "failed",
+          domainWatch: watchScope,
         },
       }),
       prisma.domainExtension.findMany({
-        where: { status: "provider_error" },
+        where: { status: "provider_error", domainWatch: watchScope },
         select: { sourceProvider: true },
       }),
       prisma.domainWatch.findMany({
-        where: { state: "active" },
+        where: { ...watchScope, state: "active" },
         orderBy: { nextCheckAt: "asc" },
         take: 5,
         include: {
@@ -67,11 +72,11 @@ export class DashboardService {
         },
       }),
       prisma.registrationAttempt.findMany({
-        where: { status: { in: ["pending", "submitted"] } },
+        where: { status: { in: ["pending", "submitted"] }, domainWatch: watchScope },
         orderBy: { initiatedAt: "asc" },
         take: 5,
       }),
-      prisma.registrationAttempt.findMany(),
+      prisma.registrationAttempt.findMany({ where: { domainWatch: watchScope } }),
     ]);
 
     const recentAvailableDomains = availableExtensionsRaw.map(mapDomainExtension);
